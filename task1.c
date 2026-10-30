@@ -42,6 +42,9 @@ static StatusCode str_copy_custom(const char *src, char *dest, size_t dest_size)
         return STATUS_ERR_NULL_PTR;
     }
     size_t i = 0;
+    if (dest_size == 0) {
+        return STATUS_ERR_INVALID_ARG;
+    }
     while (src[i] != '\0' && i + 1 < dest_size) {
         dest[i] = src[i];
         i++;
@@ -81,7 +84,7 @@ static StatusCode parse_unsigned_int(const char *str, unsigned int *out_val) {
     }
 
     unsigned long val = 0;
-    for (int i = 0; str[i] != '\0'; i++) {
+    for (size_t i = 0; str[i] != '\0'; i++) {
         if (!is_digit_custom(str[i])) {
             return STATUS_ERR_INVALID_ARG;
         }
@@ -119,8 +122,8 @@ static StatusCode validate_arguments(int argc, char *argv[], FlagType *out_flag)
         case FLAG_REVERSE:
         case FLAG_UPPER_ODD:
         case FLAG_NORMALIZE:
-            if (argc < 3) {
-                return STATUS_ERR_INVALID_ARG; // Требуется строка-аргумент
+            if (argc != 3) {
+                return STATUS_ERR_INVALID_ARG;
             }
             break;
         case FLAG_CONCAT:
@@ -267,10 +270,25 @@ static StatusCode op_concat_random(int argc, char *argv[], unsigned int seed, ch
     }
 
     for (int i = 0; i < num_strings; i++) {
-        str_len_custom(strings[i], &lens[i]);
+        StatusCode st = str_len_custom(strings[i], &lens[i]);
+        if (st != STATUS_OK) {
+            free(lens);
+            free(strings);
+            return st;
+        }
+        if (lens[i] > (size_t)-1 - total_len) {
+            free(lens);
+            free(strings);
+            return STATUS_ERR_OVERFLOW;
+        }
         total_len += lens[i];
     }
 
+    if (total_len == (size_t)-1) {
+        free(lens);
+        free(strings);
+        return STATUS_ERR_OVERFLOW;
+    }
     char *res = (char *)malloc(total_len + 1);
     if (!res) {
         free(lens);
@@ -324,7 +342,7 @@ int main(int argc, char *argv[]) {
     // обработка аргументов командной строки
     StatusCode val_status = validate_arguments(argc, argv, &flag);
     if (val_status != STATUS_OK) {
-        fprintf(stderr, "Error data%d\n", val_status);
+        fprintf(stderr, "Error data, status %d\n", val_status);
         fprintf(stderr, "Use this:\n");
         fprintf(stderr, "  %s -l <string>\n", argv[0]);
         fprintf(stderr, "  %s -r <string>\n", argv[0]);
@@ -371,12 +389,14 @@ int main(int argc, char *argv[]) {
         }
         case FLAG_CONCAT: {
             unsigned int seed = 0;
-            // парсинг seed уже обработался, но повторим для получения значения
-            parse_unsigned_int(argv[3], &seed);
-            exec_status = op_concat_random(argc, argv, seed, &string_result);
-            if (exec_status == STATUS_OK) {
-                printf("%s\n", string_result);
+            // повторим парсинг seed для получения значения
+            StatusCode seed_status = parse_unsigned_int(argv[3], &seed);
+            if (seed_status != STATUS_OK) {
+                exec_status = seed_status;
+                break;
             }
+            exec_status = op_concat_random(argc, argv, seed, &string_result);
+            printf("%s\n", string_result);
             break;
         }
         default:
